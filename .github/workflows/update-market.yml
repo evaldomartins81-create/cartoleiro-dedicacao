@@ -7,7 +7,9 @@ on:
     paths:
       - '.github/workflows/update-market.yml'
       - 'scripts/sync_market.py'
-      - 'public/optimizer.mjs'
+      - 'public/**'
+      - 'worker.js'
+      - 'functions/**'
       - 'tests/**'
 permissions:
   contents: write
@@ -31,6 +33,8 @@ jobs:
         run: |
           python3 -m py_compile scripts/sync_market.py
           node --check public/optimizer.mjs
+          node --check public/app.mjs
+          node --input-type=module --check < worker.js
           node --test tests/*.test.mjs
       - name: Publicar snapshot oficial no repositório
         run: |
