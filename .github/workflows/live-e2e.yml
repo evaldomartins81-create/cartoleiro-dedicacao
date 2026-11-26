@@ -1,0 +1,87 @@
+name: Validar aplicativo publicado em navegador real
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/live-e2e.yml'
+      - 'public/**'
+      - 'worker.js'
+      - 'functions/**'
+      - 'tests/e2e.mjs'
+  schedule:
+    - cron: '0 */6 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: cartoleiro-live-e2e
+  cancel-in-progress: true
+jobs:
+  live-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      APP_URL: https://cartoleiro-dedicacao.evaldomartins81.workers.dev/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar sintaxe e otimizador com atletas reais
+        run: |
+          node --check public/app.mjs
+          node --check public/optimizer.mjs
+          node --test tests/optimizer.test.mjs
+      - name: Aguardar publicacao da versao atual no Cloudflare
+        run: |
+          set -euo pipefail
+          found=0
+          for i in $(seq 1 20); do
+            if curl --silent --show-error --fail --max-time 20 -H 'Cache-Control: no-cache' "${APP_URL}app.mjs?ci=${GITHUB_SHA}" -o /tmp/cartoleiro-live-app.mjs \
+              && cmp -s public/app.mjs /tmp/cartoleiro-live-app.mjs; then
+              echo "Cloudflare publicou a interface desta versao."
+              found=1
+              break
+            fi
+            echo "Aguardando implantacao: tentativa ${i}/20"
+            sleep 15
+          done
+          if [ "$found" != "1" ]; then
+            echo "::error::O Cloudflare ainda nao serve a versao atual do app.mjs"
+            exit 1
+          fi
+      - name: Validar API e snapshot no site real
+        run: |
+          python3 - <<'PY'
+          import datetime,json,os,urllib.request
+          base=os.environ["APP_URL"]
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Cache-Control":"no-cache","User-Agent":"CartoleiroDedicacao-CI/2.2"})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  assert r.status==200, (path,r.status)
+                  return json.load(r)
+          meta=get("data/meta.json")
+          market=get("data/atletas.json")
+          status=get("data/status.json")
+          health=get("api/health")
+          assert len(market.get("atletas",[]))>=100
+          assert int(meta["round"])==int(status["rodada_atual"])
+          age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(meta["fetched_at"])).total_seconds()/60
+          assert 0<=age<=180, "Dados oficiais muito antigos: %.0f minutos"%age
+          assert health.get("snapshot_available"),health
+          api=get("api/atletas")
+          assert len(api.get("atletas",[]))>=100
+          print("API publica e dados oficiais: OK", "rodada",meta["round"],"atletas",len(api["atletas"]),"idade",round(age),"minutos")
+          PY
+      - name: Instalar navegador Chromium para testes reais
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Testar interface real no celular e computador
+        run: node tests/e2e.mjs
+      - name: Guardar imagens dos testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cartoleiro-validacao-visual
+          path: cartoleiro-*.png
+          if-no-files-found: ignore
