@@ -20,16 +20,33 @@ export function normalizeMarket(payload){
   if(athletes.length<30) throw Error("Mercado incompleto");
   return {athletes,clubs:payload.clubes||{}};
 }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+export function prediction(p,fixtures=[]){
+ const games=Math.max(0,number(p.jogos_num)), avg=number(p.media_num), last=number(p.pontos_num);
+ const baseline=(avg*games+3.3*4)/(games+4);
+ const f=fixtures.find(f=>[Number(f.clube_casa_id),Number(f.clube_visitante_id)].includes(Number(p.clube_id)));
+ const home=f?Number(f.clube_casa_id)===Number(p.clube_id):null;
+ const form=x=>Array.isArray(x)&&x.length?x.reduce((s,v)=>s+(v==="v"?3:v==="e"?1:0),0)/(3*x.length):null;
+ const own=f?form(home?f.aproveitamento_mandante:f.aproveitamento_visitante):null;
+ const opp=f?form(home?f.aproveitamento_visitante:f.aproveitamento_mandante):null;
+ const rank=f?number(home?f.clube_casa_posicao:f.clube_visitante_posicao):0;
+ const rival=f?number(home?f.clube_visitante_posicao:f.clube_casa_posicao):0;
+ const strength=(own!==null&&opp!==null?(own-opp)*0.7:0)+(rank&&rival?(rival-rank)/19*0.55:0)+(home===null?0:home?0.18:-0.18);
+ const rate=p.scout&&games>0?k=>Math.max(0,number(p.scout[k]))/games:null;
+ const factor=Math.exp(clamp(strength,-1,1)*0.45);
+ const goal=rate?1-Math.exp(-rate("G")*factor):null;
+ const assist=rate?1-Math.exp(-rate("A")*factor):null;
+ const sg=rate&&p.posicao_id<=3?clamp(rate("SG")*factor,0,0.95):null;
+ const win=f&&rank&&rival&&own!==null&&opp!==null?1/(1+Math.exp(0.65-2*strength)):null;
+ const recent=clamp(last-baseline,-4,5);
+ const projection=baseline+recent*0.2+strength*(p.posicao_id<=3?1.4:1.1);
+ return {projection,goal,assist,sg,win,strength,opponent:f?(home?f.clube_visitante_id:f.clube_casa_id):null,home,confidence:games>=15&&own!==null?"Maior cobertura de dados":"Dados limitados",reason:"Média ajustada "+baseline.toFixed(2)+"; "+(home===null?"confronto indisponível":home?"mandante":"visitante")+"; "+(own===null?"forma coletiva indisponível":"aproveitamento recente "+Math.round(own*100)+"%")};
+}
 export function potential(player,strategy="mitada",fixtures=[]){
-  const games=Math.max(0,number(player.jogos_num));
-  const avg=number(player.media_num);
-  const last=number(player.pontos_num);
-  const baseline=(avg*games+3.3*4)/(games+4);
-  const recent=Math.max(-4,Math.min(5,last-baseline));
-  const home=fixtures.some(f=>Number(f.clube_casa_id)===Number(player.clube_id))?0.25:0;
-  if(strategy==="segura")return baseline+Math.min(recent,0)*0.35+home;
-  if(strategy==="valor")return (baseline+recent*0.16+home)/Math.sqrt(Math.max(1,number(player.preco_num)));
-  return baseline+Math.max(0,recent)*0.34+home;
+ const p=prediction(player,fixtures);
+ if(strategy==="segura")return p.projection-Math.max(0,10-number(player.jogos_num))*0.12;
+ if(strategy==="valor")return p.projection/Math.sqrt(Math.max(1,number(player.preco_num)));
+ return p.projection;
 }
 export function optimize({athletes,budget,formation="4-3-3",strategy="mitada",fixtures=[]}){
   if(!FORMATIONS[formation])throw Error("Formação desconhecida.");
@@ -54,7 +71,8 @@ export function optimize({athletes,budget,formation="4-3-3",strategy="mitada",fi
   }
   let total=team.reduce((sum,a)=>sum+cents(a.preco_num),0);
   if(total>cap)throw Error("O patrimônio mínimo para esta formação é C$ "+(total/100).toFixed(2).replace(".",",")+".");
-  const score=a=>potential(a,strategy,fixtures);
+  const scores=new Map(unique.map(a=>[a.atleta_id,potential(a,strategy,fixtures)]));
+  const score=a=>scores.get(a.atleta_id);
   // Iterative budget-constrained improvements, never duplicate an athlete.
   for(let iteration=0;iteration<150;iteration++){
     let best=null;
@@ -84,5 +102,5 @@ export function optimize({athletes,budget,formation="4-3-3",strategy="mitada",fi
     if(sub){bench.push(sub);picked.add(sub.atleta_id);}
   }
   if(total>cap || new Set(team.map(p=>p.atleta_id)).size!==12)throw Error("Não foi possível validar a escalação.");
-  return {team,bench,captain,total:total/100,remaining:(cap-total)/100,score:team.reduce((sum,p)=>sum+score(p),0),formation,strategy,budget:Number(budget)};
+  return {predictions:Object.fromEntries(team.map(a=>[a.atleta_id,prediction(a,fixtures)])),projectedPoints:team.reduce((s,a)=>s+prediction(a,fixtures).projection,0)+prediction(captain,fixtures).projection,team,bench,captain,total:total/100,remaining:(cap-total)/100,score:team.reduce((sum,p)=>sum+score(p),0),formation,strategy,budget:Number(budget)};
 }
