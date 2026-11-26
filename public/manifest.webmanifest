@@ -1,0 +1,19 @@
+{
+  "name": "Cartoleiro Dedicação",
+  "short_name": "Cartoleiro",
+  "description": "Assistente independente para escalação inteligente do Cartola FC",
+  "lang": "pt-BR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#081811",
+  "theme_color": "#081811",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
