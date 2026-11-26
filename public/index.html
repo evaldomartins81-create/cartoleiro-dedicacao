@@ -1,8 +1,98 @@
-<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cartoleiro Dedicação</title><style>*{box-sizing:border-box}body{margin:auto;max-width:850px;padding:20px;background:#101813;color:#effff3;font:16px system-ui}header,section{background:#1d3024;padding:20px;border-radius:18px;margin-bottom:16px}h1{margin:0;color:#8df0a8}button,input,select{font:inherit;padding:12px;border-radius:9px;border:1px solid #57745e;margin:5px 0;max-width:100%}button{background:#83e6a0;color:#102517;font-weight:bold;cursor:pointer}input,select{background:#101813;color:white;width:100%}table{width:100%;border-collapse:collapse}td,th{padding:8px;text-align:left;border-bottom:1px solid #405747}small{color:#b6c9ba}.scroll{overflow:auto}label{display:block;margin-top:10px}button{width:100%;min-height:48px}button:disabled{opacity:.45;cursor:not-allowed}#status{margin:12px 0}h2{font-size:1.3rem}</style><header><small>ASSISTENTE INDEPENDENTE • CARTOLA FC</small><h1>⚽ Cartoleiro Dedicação</h1><p>Sua estratégia para mitar!</p><div id="status" role="status">Consultando mercado…</div><button id="refresh">Tentar novamente</button><small id="version"> • Versão 2.0</small></header><section><h2>Escalação inteligente</h2><label>Patrimônio (C$)<input id="budget" type="number" min="1" step=".01" value="152"></label><label>Estratégia<select id="strategy"><option value="mitada">Mitada</option><option value="segura">Segurança</option><option value="valor">Valorização (heurística)</option></select></label><label>Formação<select id="formation"><option>4-3-3</option><option>4-4-2</option><option>3-4-3</option><option>3-5-2</option><option>5-3-2</option><option>5-4-1</option></select></label><button id="generate" disabled>Gerar meu time</button><div id="result" aria-live="polite"></div><small>Estimativas heurísticas, sem garantia de pontuação. Não envia escalação ao Cartola.</small></section><section><h2>Mercado de atletas</h2><input id="search" placeholder="Buscar atleta ou clube"><select id="position"><option value="">Todas as posições</option><option value="1">Goleiro</option><option value="2">Lateral</option><option value="3">Zagueiro</option><option value="4">Meia</option><option value="5">Atacante</option><option value="6">Técnico</option></select><div class="scroll"><table><thead><tr><th>Atleta</th><th>Clube</th><th>C$</th><th>Média</th></tr></thead><tbody id="market"></tbody></table></div></section><section><h2>Jogos da rodada</h2><div id="games"></div></section><footer><small>Projeto independente, sem vínculo com a Globo. Dados públicos sujeitos a disponibilidade. Conta pessoal não conectada.</small></footer><script>
-const $=id=>document.getElementById(id), pos=['','GOL','LAT','ZAG','MEI','ATA','TEC'];let players=[],clubs={};const num=x=>Number(x)||0;const money=x=>num(x).toFixed(2).replace('.',',');const club=a=>clubs[a.clube_id]?.abreviacao||String(a.clube_id);const name=a=>a.apelido||a.nome||'Atleta';function el(tag,t){let e=document.createElement(tag);e.textContent=t;return e}const endpoints={atletas:'/atletas/mercado',status:'/mercado/status',partidas:'/partidas'};async function api(p){let errors=[];for(const [source,url] of [['Globo','https://api.cartola.globo.com'+endpoints[p]],['Cloudflare','/api/'+p]]){try{let r=await fetch(url,{signal:AbortSignal.timeout(12000),credentials:'omit',cache:'no-store'});if(!r.ok){let detail='';try{let d=await r.json();detail=d.upstream_status?' (origem '+d.upstream_status+')':''}catch{}throw Error('HTTP '+r.status+detail)}let data=await r.json();if(p==='atletas'&&!Array.isArray(data?.atletas))throw Error('Formato inesperado');return data}catch(e){errors.push(source+': '+(e.message||'Falha de conexão'))}}throw Error(errors.join(' | '))}
-async function load(){$('refresh').disabled=true;$('generate').disabled=true;$('status').textContent='Buscando jogadores da rodada…';try{let m=await api('atletas');if(!Array.isArray(m.atletas)||!m.atletas.length)throw Error('Formato inesperado');players=m.atletas.map(a=>({...a,posicao_id:Number(a.posicao_id),status_id:Number(a.status_id)}));clubs=m.clubes||{};render();$('generate').disabled=false;$('refresh').textContent='Atualizar jogadores';$('status').textContent='Mercado atualizado: '+new Date().toLocaleString('pt-BR');}catch(e){players=[];clubs={};render();$('status').textContent='Mercado temporariamente indisponível. Tente novamente em instantes.';$('status').title=e.message;$('refresh').textContent='Tentar novamente';}$('refresh').disabled=false;if(!players.length)return;try{let s=await api('status');$('status').textContent+=' • Rodada '+(s.rodada_atual??'?')+' • '+(s.status_mercado===1?'Aberto':s.status_mercado===2?'Fechado':'Status '+s.status_mercado);}catch{}try{let g=await api('partidas');$('games').replaceChildren(...(g.partidas||[]).map(p=>el('p',(clubs[p.clube_casa_id]?.nome||p.clube_casa_id)+' × '+(clubs[p.clube_visitante_id]?.nome||p.clube_visitante_id)+' • '+(p.partida_data||''))));}catch{$('games').textContent='Confrontos indisponíveis.'}}
-function render(){let q=$('search').value.toLowerCase(),p=$('position').value;let rows=players.filter(a=>(!p||a.posicao_id==p)&&(name(a)+' '+club(a)).toLowerCase().includes(q)).sort((a,b)=>num(b.media_num)-num(a.media_num)).slice(0,150);$('market').replaceChildren(...rows.map(a=>{let r=el('tr','');for(let v of [name(a),club(a),money(a.preco_num),money(a.media_num)])r.append(el('td',v));return r}))}
-function score(a){let m=num(a.media_num),last=num(a.pontos_num),games=num(a.jogos_num),price=num(a.preco_num),s=$('strategy').value;let base=(m*games+3*3)/(games+3);return s==='segura'?base:s==='valor'?base/Math.max(3,price)+Math.max(0,base-last)*.05:base+.2*Math.max(0,last-base)+.05*num(a.scout?.G)+.03*num(a.scout?.A)}
-function generate(){let out=$('result');out.replaceChildren();let budget=Number($('budget').value);if(!Number.isFinite(budget)||budget<=0){out.textContent='Informe um patrimônio válido.';return}let [d,m,a]=$('formation').value.split('-').map(Number),lat=d>=4?2:0;let slots=[1,...Array(lat).fill(2),...Array(d-lat).fill(3),...Array(m).fill(4),...Array(a).fill(5),6];if(!players.length){out.textContent='Aguarde o carregamento dos jogadores.';return}let pool=players.filter(x=>x.status_id===7&&num(x.preco_num)>0);let team=[],cost=0;for(let p of slots){let options=pool.filter(x=>x.posicao_id===p&&!team.includes(x)).sort((x,y)=>num(x.preco_num)-num(y.preco_num));if(!options.length){out.textContent='Atletas prováveis insuficientes para esta formação.';return}team.push(options[0]);cost+=num(options[0].preco_num)}if(cost>budget){out.textContent='Patrimônio insuficiente. Mínimo estimado C$ '+money(cost);return}for(let i=0;i<200;i++){let best=null;for(let j=0;j<team.length;j++){for(let x of pool){if(x.posicao_id!==team[j].posicao_id||team.includes(x))continue;let delta=num(x.preco_num)-num(team[j].preco_num),gain=score(x)-score(team[j]);if(cost+delta>budget+.00001||gain<=.00001)continue;let merit=gain/Math.max(1,delta);if(!best||merit>best.merit)best={j,x,delta,merit}}}if(!best)break;team[best.j]=best.x;cost+=best.delta}let captain=team.filter(x=>x.posicao_id!==6).sort((x,y)=>score(y)-score(x))[0];out.append(el('h3','Time sugerido • C$ '+money(cost)),el('p','Saldo: C$ '+money(budget-cost)));for(let x of team)out.append(el('p',pos[x.posicao_id]+' • '+name(x)+' ('+club(x)+') • C$ '+money(x.preco_num)+(x===captain?' ★ Capitão':'')));out.append(el('h3','Reservas sugeridos'));for(let p of [1,2,3,4,5]){let starters=team.filter(x=>x.posicao_id===p);if(!starters.length)continue;let cap=Math.min(...starters.map(x=>num(x.preco_num)));let r=pool.filter(x=>x.posicao_id===p&&!team.includes(x)&&num(x.preco_num)<=cap).sort((x,y)=>score(y)-score(x))[0];out.append(el('p',pos[p]+' • '+(r?name(r)+' • C$ '+money(r.preco_num):'Sem opção elegível')))}}
-$('refresh').onclick=load;$('generate').onclick=generate;$('search').oninput=render;$('position').onchange=render;load();
-</script></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#081811">
+  <meta name="description" content="Monte uma escalação sugerida para o Cartola FC com dados reais, dentro das suas cartoletas.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <title>Cartoleiro Dedicação • Escalação inteligente</title>
+</head>
+<body>
+  <header class="topbar shell">
+    <a class="brand" href="/" aria-label="Cartoleiro Dedicação, página inicial">
+      <span class="brand-mark" aria-hidden="true">⚽</span>
+      <span><strong>Cartoleiro <em>Dedicação</em></strong><small>Seu assistente para a rodada</small></span>
+    </a>
+    <span class="top-tag">INDEPENDENTE</span>
+  </header>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">ESTRATÉGIA EM CAMPO</p>
+        <h1>Seu próximo time <span>começa aqui.</span></h1>
+        <p class="hero-copy">Escolha como quer jogar. Nós sugerimos os atletas dentro do seu orçamento.</p>
+      </div>
+      <div class="match-strip" aria-live="polite">
+        <div><small>RODADA</small><strong id="round">—</strong></div>
+        <div><small>MERCADO</small><strong id="market-state">Consultando</strong></div>
+        <div><small>ATLETAS</small><strong id="athlete-count">—</strong></div>
+      </div>
+    </section>
+    <div class="connection" id="connection" role="status" aria-live="polite">
+      <span class="pulse-dot"></span><span id="connection-text">Buscando os dados oficiais do Cartola FC…</span>
+      <button type="button" id="refresh" class="ghost compact" hidden>Recarregar</button>
+    </div>
+    <section class="panel planner" aria-labelledby="planning-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">01 • MONTE SUA ESTRATÉGIA</p><h2 id="planning-title">Como vamos escalar?</h2></div>
+      </div>
+      <label class="field-label" for="budget">Patrimônio disponível</label>
+      <div class="currency-field"><span>C$</span><input id="budget" type="number" inputmode="decimal" min="0.01" step="0.01" value="152" aria-describedby="budget-help"></div>
+      <small class="hint" id="budget-help">Use o valor que aparece no seu Cartola.</small>
+      <fieldset class="strategy-set">
+        <legend class="field-label">Qual é seu objetivo?</legend>
+        <div class="strategy-grid" id="strategies">
+          <button type="button" class="strategy active" data-strategy="mitada" aria-pressed="true"><span class="strategy-emoji">🔥</span><strong>Mitada</strong><small>Buscar mais pontos</small></button>
+          <button type="button" class="strategy" data-strategy="segura" aria-pressed="false"><span class="strategy-emoji">🛡️</span><strong>Segurança</strong><small>Priorizar constância</small></button>
+          <button type="button" class="strategy" data-strategy="valor" aria-pressed="false"><span class="strategy-emoji">💰</span><strong>Valorização</strong><small>Custo-benefício</small></button>
+        </div>
+      </fieldset>
+      <label class="field-label" for="formation">Formação tática</label>
+      <select id="formation">
+        <option value="4-3-3">4-3-3 • Equilibrada</option>
+        <option value="3-4-3">3-4-3 • Ofensiva</option>
+        <option value="3-5-2">3-5-2 • Meio-campo forte</option>
+        <option value="4-4-2">4-4-2 • Tradicional</option>
+        <option value="4-5-1">4-5-1 • Controle</option>
+        <option value="5-3-2">5-3-2 • Defesa forte</option>
+        <option value="5-4-1">5-4-1 • Conservadora</option>
+      </select>
+      <button id="generate" class="primary" type="button" disabled>⚽ Gerar meu time</button>
+      <p id="form-message" class="form-message" role="alert" aria-live="polite"></p>
+      <p class="fineprint">Sugestões por indicadores estatísticos, não uma previsão garantida. Nenhuma escalação é enviada à sua conta Globo.</p>
+    </section>
+    <section id="results" class="panel results" hidden aria-labelledby="results-title">
+      <div class="section-heading"><div><p class="eyebrow">02 • TIME SUGERIDO</p><h2 id="results-title">Seu esquadrão</h2></div><span class="tag" id="result-formation">4-3-3</span></div>
+      <div class="result-stats">
+        <div><small>CUSTO TOTAL</small><strong id="total-cost">—</strong></div>
+        <div><small>CARTOLETAS RESTANTES</small><strong id="remaining">—</strong></div>
+        <div><small>ESTRATÉGIA</small><strong id="result-strategy">—</strong></div>
+      </div>
+      <div class="pitch" id="lineup" aria-label="Atletas titulares e técnico"></div>
+      <h3>Banco de reservas</h3>
+      <p class="hint">Até um reserva por posição utilizada, respeitando o limite de preço do Cartola.</p>
+      <div id="bench" class="bench"></div>
+      <div class="button-row"><button id="copy-team" class="outline" type="button">Copiar escalação</button><button id="generate-again" class="outline" type="button">Gerar novamente</button></div>
+    </section>
+    <details class="panel explore">
+      <summary><span>🔎 <strong>Explorar atletas</strong><small>Pesquise jogadores, preços e médias</small></span><span aria-hidden="true">＋</span></summary>
+      <div class="explore-body">
+        <label for="search" class="field-label">Buscar atleta ou clube</label>
+        <input id="search" type="search" placeholder="Ex.: atacante, clube, jogador">
+        <label for="position" class="field-label">Posição</label>
+        <select id="position"><option value="">Todas as posições</option><option value="1">Goleiro</option><option value="2">Lateral</option><option value="3">Zagueiro</option><option value="4">Meia</option><option value="5">Atacante</option><option value="6">Técnico</option></select>
+        <div id="market-list" class="market-list"><p class="hint">Carregando mercado…</p></div>
+      </div>
+    </details>
+    <details class="panel explore">
+      <summary><span>📅 <strong>Jogos da rodada</strong><small>Veja os confrontos publicados pela Globo</small></span><span aria-hidden="true">＋</span></summary>
+      <div id="games" class="games explore-body"><p class="hint">Buscando confrontos…</p></div>
+    </details>
+  </main>
+  <footer class="shell footer"><strong>Cartoleiro Dedicação</strong><p>Projeto independente, sem vínculo com Globo ou Cartola FC. Informações públicas sujeitas à disponibilidade.</p><span id="updated-time"></span></footer>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>
