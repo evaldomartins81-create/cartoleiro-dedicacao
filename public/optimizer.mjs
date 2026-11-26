@@ -63,36 +63,41 @@ export function optimize({athletes,budget,formation="4-3-3",strategy="mitada",fi
     pools[p]=unique.filter(a=>a.posicao_id===p).sort((a,b)=>cents(a.preco_num)-cents(b.preco_num)||a.atleta_id-b.atleta_id);
     if(slots.includes(p) && pools[p].length<slots.filter(x=>x===p).length)throw Error("Não há atletas prováveis suficientes para "+POSITIONS[p]+".");
   }
-  const picked=new Set();const team=[];
-  for(const pos of slots){
-    const candidate=pools[pos].find(a=>!picked.has(a.atleta_id));
-    if(!candidate)throw Error("Mercado sem opções suficientes.");
-    team.push(candidate);picked.add(candidate.atleta_id);
-  }
-  let total=team.reduce((sum,a)=>sum+cents(a.preco_num),0);
-  if(total>cap)throw Error("O patrimônio mínimo para esta formação é C$ "+(total/100).toFixed(2).replace(".",",")+".");
+  // Exact sparse dynamic programming: keep nondominated cost/score states.
   const scores=new Map(unique.map(a=>[a.atleta_id,potential(a,strategy,fixtures)]));
   const score=a=>scores.get(a.atleta_id);
-  // Iterative budget-constrained improvements, never duplicate an athlete.
-  for(let iteration=0;iteration<150;iteration++){
-    let best=null;
-    for(let i=0;i<team.length;i++){
-      const current=team[i];
-      const candidates=pools[current.posicao_id].filter(a=>!picked.has(a.atleta_id)&&total+cents(a.preco_num)-cents(current.preco_num)<=cap)
-        .sort((a,b)=>score(b)-score(a)).slice(0,38);
-      for(const a of candidates){
-        const gain=score(a)-score(current);
-        if(gain<=0.0001)continue;
-        const delta=cents(a.preco_num)-cents(current.preco_num);
-        const merit=gain/Math.max(100,delta>0?delta:100);
-        if(!best||merit>best.merit||(merit===best.merit&&gain>best.gain))best={i,a,gain,delta,merit};
+  function prune(states){
+    let best=-Infinity;const out=new Map();
+    for(const [cost,state] of [...states].sort((a,b)=>a[0]-b[0])){
+      if(state.value>best+1e-9){out.set(cost,state);best=state.value;}
+    }return out;
+  }
+  function put(map,cost,state){if(cost<=cap&&(!map.has(cost)||map.get(cost).value<state.value))map.set(cost,state);}
+  let global=[new Map([[0,{value:0,team:[],captain:null}]]),new Map()];
+  for(const pos of [1,2,3,4,5,6]){
+    const count=slots.filter(x=>x===pos).length;if(!count)continue;
+    const dp=Array.from({length:count+1},()=>[new Map(),new Map()]);
+    dp[0][0].set(0,{value:0,team:[],captain:null});
+    for(const a of pools[pos]){
+      const cost=cents(a.preco_num),v=score(a);
+      for(let k=count;k>=1;k--){
+        for(let flag=0;flag<=1;flag++)for(const [old,s] of dp[k-1][flag]){
+          put(dp[k][flag],old+cost,{value:s.value+v,team:[...s.team,a],captain:s.captain});
+          if(!flag&&pos!==6)put(dp[k][1],old+cost,{value:s.value+2*v,team:[...s.team,a],captain:a});
+        }
+        dp[k]=dp[k].map(prune);
       }
     }
-    if(!best)break;
-    picked.delete(team[best.i].atleta_id);
-    team[best.i]=best.a;picked.add(best.a.atleta_id);total+=best.delta;
+    const next=[new Map(),new Map()];
+    for(let i=0;i<=1;i++)for(let j=0;j<=1-i;j++)
+      for(const [x,a] of global[i])for(const [y,b] of dp[count][j])
+        put(next[i+j],x+y,{value:a.value+b.value,team:[...a.team,...b.team],captain:a.captain||b.captain});
+    global=next.map(prune);
   }
-  const captain=team.filter(p=>p.posicao_id!==6).sort((a,b)=>score(b)-score(a))[0];
+  const best=[...global[1]].sort((a,b)=>b[1].value-a[1].value||a[0]-b[0])[0];
+  if(!best)throw Error("Patrimônio insuficiente para esta formação.");
+  const [total,chosen]=best,team=chosen.team,captain=chosen.captain;
+  const picked=new Set(team.map(a=>a.atleta_id));
   const bench=[];
   for(const pos of [1,2,3,4,5]){
     const starters=team.filter(p=>p.posicao_id===pos);
