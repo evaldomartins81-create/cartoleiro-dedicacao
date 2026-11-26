@@ -52,25 +52,31 @@ jobs:
       - name: Validar API e snapshot no site real
         run: |
           python3 - <<'PY'
-          import datetime,json,os,urllib.request
+          import datetime,json,os,time,urllib.request
           base=os.environ["APP_URL"]
           def get(path):
               req=urllib.request.Request(base+path,headers={"Cache-Control":"no-cache","User-Agent":"CartoleiroDedicacao-CI/2.2"})
               with urllib.request.urlopen(req,timeout=25) as r:
                   assert r.status==200, (path,r.status)
                   return json.load(r)
-          meta=get("data/meta.json")
-          market=get("data/atletas.json")
-          status=get("data/status.json")
-          health=get("api/health")
-          assert len(market.get("atletas",[]))>=100
-          assert int(meta["round"])==int(status["rodada_atual"])
-          age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(meta["fetched_at"])).total_seconds()/60
-          assert 0<=age<=180, "Dados oficiais muito antigos: %.0f minutos"%age
-          assert health.get("snapshot_available"),health
-          api=get("api/atletas")
-          assert len(api.get("atletas",[]))>=100
-          print("API publica e dados oficiais: OK", "rodada",meta["round"],"atletas",len(api["atletas"]),"idade",round(age),"minutos")
+          for attempt in range(24):
+              try:
+                  meta=get("data/meta.json")
+                  age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(meta["fetched_at"])).total_seconds()/60
+                  assert 0<=age<=120, "Snapshot publicado antigo: %.0f minutos"%age
+                  status=get("data/status.json")
+                  assert int(meta["round"])==int(status["rodada_atual"])
+                  health=get("api/health")
+                  assert health.get("snapshot_fresh"),health
+                  api=get("api/atletas")
+                  assert len(api.get("atletas",[]))>=100
+                  assert len(api["atletas"])==int(meta["athletes"])
+                  print("Aplicativo publicado atualizado:",meta["round"],"rodada,",len(api["atletas"]),"atletas oficiais,",round(age),"minutos")
+                  break
+              except Exception as exc:
+                  print("Aguardando atualizacao publica",attempt+1,"de 24:",repr(exc),flush=True)
+                  if attempt==23:raise
+                  time.sleep(15)
           PY
       - name: Instalar navegador Chromium para testes reais
         run: |
