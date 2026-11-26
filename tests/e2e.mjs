@@ -30,6 +30,7 @@ try{
       assert.ok(cost>0 && cost<=152,label+" "+strategy+" invalid cost "+costText);
       assert.equal(await page.locator("#result-formation").textContent(),formation);
     }
+    await page.locator("details.explore").first().locator("summary").click();
     await page.locator("#search").fill("vasco");
     assert.ok((await page.locator("#market-list .market-item").count())>=0);
     await page.locator("#search").fill("");
