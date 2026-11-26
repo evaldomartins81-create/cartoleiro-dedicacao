@@ -1,0 +1,45 @@
+name: Atualizar dados reais e testar aplicativo
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/update-market.yml'
+      - 'scripts/sync_market.py'
+      - 'public/optimizer.mjs'
+      - 'tests/**'
+permissions:
+  contents: write
+concurrency:
+  group: cartola-market-snapshot
+  cancel-in-progress: false
+jobs:
+  sync-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Sincronizar dados oficiais (sem dados fictícios)
+        run: python3 scripts/sync_market.py
+      - name: Validar sintaxe e regras de escalação
+        run: |
+          python3 -m py_compile scripts/sync_market.py
+          node --check public/optimizer.mjs
+          node --test tests/*.test.mjs
+      - name: Publicar snapshot oficial no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/
+          if git diff --cached --quiet; then
+            echo "Nenhum dado novo para publicar"
+          else
+            git commit -m "Atualizar mercado real do Cartola [skip ci]"
+            git push
+          fi
