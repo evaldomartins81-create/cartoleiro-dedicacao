@@ -8,6 +8,7 @@ on:
       - '.github/workflows/update-market.yml'
       - 'scripts/sync_market.py'
       - 'public/**'
+      - '!public/data/**'
       - 'worker.js'
       - 'functions/**'
       - 'tests/**'
@@ -44,6 +45,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "Nenhum dado novo para publicar"
           else
-            git commit -m "Atualizar mercado real do Cartola [skip ci]"
+            git commit -m "Atualizar mercado real do Cartola"
             git push
           fi
